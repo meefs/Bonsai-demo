@@ -276,7 +276,7 @@ if [ "$OS" = "Darwin" ]; then
             echo ""
             echo "  MLX requires the full Xcode app (not just Command Line Tools)."
             echo "  1. Install Xcode from the App Store:"
-            echo "       https://apps.apple.com/us/app/xcode/id497799835"
+            echo "       https://developer.apple.com/xcode/"
             echo "  2. Switch the active developer directory to Xcode:"
             echo "       sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer"
             echo "  3. Accept the Xcode license and complete first-launch setup:"
@@ -295,9 +295,6 @@ if [ "$OS" = "Darwin" ]; then
             echo "    xcodebuild -runFirstLaunch"
             echo "    xcodebuild -downloadComponent MetalToolchain"
         fi
-        echo ""
-        echo "  Note: llama.cpp is already installed and usable without MLX."
-        echo "        Run ./scripts/run_llama.sh to use it now."
         exit 1
     fi
 
