@@ -21,9 +21,9 @@ The required inference kernels are not yet available in upstream llama.cpp or ML
 - **llama.cpp:** [PrismML-Eng/llama.cpp](https://github.com/PrismML-Eng/llama.cpp) — [pre-built binaries](https://github.com/PrismML-Eng/llama.cpp/releases/tag/prism-b8196-f5dda72)
 - **MLX:** [PrismML-Eng/mlx](https://github.com/PrismML-Eng/mlx) (branch `prism`)
 
-## News:
+## News
 - llama.cpp CPU backend PR merged into main: https://github.com/ggml-org/llama.cpp/pull/21273
-- llama.cpp Metal backed PR pending: https://github.com/ggml-org/llama.cpp/pull/21528
+- llama.cpp Metal backend PR pending: https://github.com/ggml-org/llama.cpp/pull/21528
 - MLX PR pending: https://github.com/ml-explore/mlx/pull/3161
 
 ## Models
