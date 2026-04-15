@@ -1,4 +1,4 @@
-# Apple M4 Pro — Metal
+# Apple M4 Pro 48 GB — Metal
 
 ## Summary
 

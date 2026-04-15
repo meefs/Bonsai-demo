@@ -2,6 +2,12 @@
 
 Benchmark results submitted by the community running Bonsai models on their own hardware.
 
+## Results
+
+| Hardware | Backend | Details |
+|----------|---------|---------|
+| Apple M4 Pro 48 GB | llama.cpp Metal | [link](metal-m4-pro-48gb-macos.md) |
+
 ## How to Submit
 
 1. Run `./setup.sh` to download models and binaries
@@ -28,8 +34,3 @@ Benchmark results submitted by the community running Bonsai models on their own 
 
 All three model sizes (8B, 4B, 1.7B) are preferred. Skip any that don't fit in memory or are too slow.
 
-## Results
-
-<!-- Add links to submitted benchmarks below, grouped by backend -->
-
-*No submissions yet. Be the first!*

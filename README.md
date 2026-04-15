@@ -31,6 +31,10 @@ Q1_0 support for CPU, Metal, and Vulkan backends is already merged into upstream
 | CPU (optimized x86) | ⏳ Pending | [#21636](https://github.com/ggml-org/llama.cpp/pull/21636) |
 | MLX | ⏳ Pending | [mlx#3161](https://github.com/ml-explore/mlx/pull/3161) |
 
+## Benchmarks
+
+See [community-benchmarks/](community-benchmarks/) for results on different hardware and templates to submit your own.
+
 ## Models
 
 Three model sizes are available: **8B**, **4B**, and **1.7B**, each in two formats:
