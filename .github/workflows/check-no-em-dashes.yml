@@ -5,9 +5,14 @@ on:
   push:
     branches:
       - master
+  pull_request:
+    types: [labeled]
 
 jobs:
   check-no-em-dashes:
+    if: >-
+      github.event_name != 'pull_request' ||
+      contains(github.event.pull_request.labels.*.name, 'check-em-dash')
     runs-on: ubuntu-latest
     permissions:
       contents: read

@@ -3,6 +3,11 @@ name: Manual platform smoke tests
 on:
   workflow_dispatch:
     inputs:
+      force_fresh_download:
+        description: "Skip shared model artifact; each job downloads its own model via setup.sh"
+        required: false
+        default: false
+        type: boolean
       enable_linux_cuda:
         description: "Run optional self-hosted Linux CUDA job"
         required: false
@@ -33,6 +38,8 @@ on:
         required: false
         default: false
         type: boolean
+  pull_request:
+    types: [labeled]
 
 permissions:
   contents: read
@@ -41,12 +48,53 @@ env:
   BONSAI_MODEL: "1.7B"
 
 jobs:
+  download-model:
+    name: Download model
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.pull_request.labels.*.name, 'smoke-test')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install huggingface-hub
+      - name: Cache models
+        id: cache-models
+        uses: actions/cache@v4
+        with:
+          path: models
+          key: models-bonsai-${{ env.BONSAI_MODEL }}-${{ hashFiles('scripts/download_models.sh') }}
+      - name: Download models
+        if: steps.cache-models.outputs.cache-hit != 'true'
+        run: ./scripts/download_models.sh
+      - name: Upload models
+        uses: actions/upload-artifact@v4
+        with:
+          name: bonsai-models
+          path: models
+          retention-days: 1
+          compression-level: 0
+
+  # ──────────────────────────────────────────
+  # Always-on hosted runners
+  # ──────────────────────────────────────────
+
   linux-x86-cpu:
     name: Linux x86 CPU (hosted)
+    needs: [download-model]
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+      - name: Download models
+        if: ${{ !inputs.force_fresh_download }}
+        uses: actions/download-artifact@v4
+        with:
+          name: bonsai-models
+          path: models
       - name: Log runner hardware
         run: |
           echo "Runner: $RUNNER_OS/$RUNNER_ARCH"
@@ -55,26 +103,31 @@ jobs:
           nvidia-smi || true
           rocminfo || true
           vulkaninfo --summary || true
-      - name: Cache models and binaries
+      - name: Cache binaries
         uses: actions/cache@v4
         with:
-          path: |
-            models
-            bin
-          key: ${{ runner.os }}-${{ runner.arch }}-bonsai-${{ env.BONSAI_MODEL }}-${{ hashFiles('scripts/download_models.sh', 'scripts/download_binaries.sh', 'setup.sh', 'setup.ps1') }}
+          path: bin
+          key: ${{ runner.os }}-${{ runner.arch }}-bonsai-bin-${{ hashFiles('scripts/download_binaries.sh', 'setup.sh') }}
           restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-bonsai-${{ env.BONSAI_MODEL }}-
+            ${{ runner.os }}-${{ runner.arch }}-bonsai-bin-
       - name: Setup
         run: ./setup.sh
       - name: llama-cli smoke test
-        run: './scripts/run_llama.sh -c 256 -st -n 1 -p "ok"'
+        run: './scripts/run_llama.sh -c 256 -st -n 10 -p "The meaning of life is"'
 
   windows-x86-cpu:
     name: Windows x86 CPU (hosted)
+    needs: [download-model]
     runs-on: windows-latest
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+      - name: Download models
+        if: ${{ !inputs.force_fresh_download }}
+        uses: actions/download-artifact@v4
+        with:
+          name: bonsai-models
+          path: models
       - name: Log runner hardware
         shell: pwsh
         run: |
@@ -82,15 +135,13 @@ jobs:
           Get-CimInstance Win32_Processor | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors | Format-Table -AutoSize
           Get-CimInstance Win32_VideoController | Select-Object Name, AdapterRAM, DriverVersion | Format-Table -AutoSize
           if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) { nvidia-smi }
-      - name: Cache models and binaries
+      - name: Cache binaries
         uses: actions/cache@v4
         with:
-          path: |
-            models
-            bin
-          key: ${{ runner.os }}-${{ runner.arch }}-bonsai-${{ env.BONSAI_MODEL }}-${{ hashFiles('scripts/download_models.sh', 'scripts/download_binaries.sh', 'setup.sh', 'setup.ps1') }}
+          path: bin
+          key: ${{ runner.os }}-${{ runner.arch }}-bonsai-bin-${{ hashFiles('scripts/download_binaries.sh', 'setup.sh', 'setup.ps1') }}
           restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-bonsai-${{ env.BONSAI_MODEL }}-
+            ${{ runner.os }}-${{ runner.arch }}-bonsai-bin-
       - name: Setup
         shell: pwsh
         run: |
@@ -109,15 +160,22 @@ jobs:
           )
           $bin = $binCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
           if (-not $bin) { throw "llama-cli.exe not found under bin/" }
-          & $bin -m $model.FullName -ngl 0 -c 256 --log-disable -st -n 1 -p "ok"
+          & $bin -m $model.FullName -ngl 0 -c 256 --log-disable -st -n 10 -p "The meaning of life is"
           if ($LASTEXITCODE -ne 0) { throw "llama-cli smoke test failed" }
 
   macos-metal:
     name: macOS Metal + MLX (hosted)
+    needs: [download-model]
     runs-on: macos-14
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
+      - name: Download models
+        if: ${{ !inputs.force_fresh_download }}
+        uses: actions/download-artifact@v4
+        with:
+          name: bonsai-models
+          path: models
       - name: Log runner hardware
         run: |
           echo "Runner: $RUNNER_OS/$RUNNER_ARCH"
@@ -125,31 +183,151 @@ jobs:
           sysctl -n machdep.cpu.brand_string || true
           system_profiler SPHardwareDataType || true
           system_profiler SPDisplaysDataType || true
-      - name: Cache models and binaries
+      - name: Cache binaries and MLX
         uses: actions/cache@v4
         with:
           path: |
-            models
             bin
-            # macOS job runs MLX smoke test; setup.sh clones/builds ./mlx on Apple Silicon.
             mlx
-          key: ${{ runner.os }}-${{ runner.arch }}-bonsai-${{ env.BONSAI_MODEL }}-${{ hashFiles('scripts/download_models.sh', 'scripts/download_binaries.sh', 'setup.sh', 'setup.ps1') }}
+            models/Bonsai-${{ env.BONSAI_MODEL }}-mlx
+          key: ${{ runner.os }}-${{ runner.arch }}-bonsai-bin-mlx-${{ hashFiles('scripts/download_binaries.sh', 'setup.sh') }}
           restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-bonsai-${{ env.BONSAI_MODEL }}-
+            ${{ runner.os }}-${{ runner.arch }}-bonsai-bin-mlx-
       - name: Setup
         run: ./setup.sh
       - name: llama-cli smoke test
-        run: './scripts/run_llama.sh -c 256 -st -n 1 -p "ok"'
+        run: './scripts/run_llama.sh -c 256 -st -n 10 -p "The meaning of life is"'
       - name: MLX smoke test
-        run: './scripts/run_mlx.sh -n 1 -p "ok"'
+        run: './scripts/run_mlx.sh -n 10 -p "The meaning of life is"'
+
+  macos-intel-cpu:
+    name: macOS Intel CPU (hosted)
+    needs: [download-model]
+    runs-on: macos-15-intel
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download models
+        if: ${{ !inputs.force_fresh_download }}
+        uses: actions/download-artifact@v4
+        with:
+          name: bonsai-models
+          path: models
+      - name: Log runner hardware
+        run: |
+          echo "Runner: $RUNNER_OS/$RUNNER_ARCH"
+          uname -a || true
+          sysctl -n machdep.cpu.brand_string || true
+          system_profiler SPHardwareDataType || true
+          system_profiler SPDisplaysDataType || true
+      - name: Cache binaries
+        uses: actions/cache@v4
+        with:
+          path: bin
+          key: ${{ runner.os }}-${{ runner.arch }}-bonsai-bin-${{ hashFiles('scripts/download_binaries.sh', 'setup.sh') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-bonsai-bin-
+      - name: Setup
+        run: ./setup.sh
+      - name: llama-cli smoke test
+        run: './scripts/run_llama.sh -c 256 -st -n 10 -p "The meaning of life is"'
+
+  linux-arm-cpu:
+    name: Linux ARM64 CPU (hosted)
+    needs: [download-model]
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download models
+        if: ${{ !inputs.force_fresh_download }}
+        uses: actions/download-artifact@v4
+        with:
+          name: bonsai-models
+          path: models
+      - name: Log runner hardware
+        run: |
+          echo "Runner: $RUNNER_OS/$RUNNER_ARCH"
+          uname -a || true
+          lscpu || true
+      - name: Cache binaries
+        uses: actions/cache@v4
+        with:
+          path: bin
+          key: ${{ runner.os }}-${{ runner.arch }}-bonsai-bin-${{ hashFiles('scripts/download_binaries.sh', 'setup.sh') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-bonsai-bin-
+      - name: Setup
+        run: ./setup.sh
+      - name: llama-cli smoke test
+        run: './scripts/run_llama.sh -c 256 -st -n 10 -p "The meaning of life is"'
+
+  windows-arm-cpu:
+    name: Windows ARM64 CPU (hosted)
+    needs: [download-model]
+    runs-on: windows-11-arm
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download models
+        if: ${{ !inputs.force_fresh_download }}
+        uses: actions/download-artifact@v4
+        with:
+          name: bonsai-models
+          path: models
+      - name: Log runner hardware
+        shell: pwsh
+        run: |
+          Write-Host "Runner: $env:RUNNER_OS/$env:RUNNER_ARCH"
+          Get-CimInstance Win32_Processor | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors | Format-Table -AutoSize
+          Get-CimInstance Win32_VideoController | Select-Object Name, AdapterRAM, DriverVersion | Format-Table -AutoSize
+      - name: Cache binaries
+        uses: actions/cache@v4
+        with:
+          path: bin
+          key: ${{ runner.os }}-${{ runner.arch }}-bonsai-bin-${{ hashFiles('scripts/download_binaries.sh', 'setup.sh', 'setup.ps1') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-bonsai-bin-
+      - name: Setup
+        shell: pwsh
+        run: |
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+          .\setup.ps1
+      - name: llama-cli smoke test
+        shell: pwsh
+        run: |
+          $model = Get-ChildItem -Path "models\gguf\1.7B" -Filter *.gguf -File | Select-Object -First 1
+          if (-not $model) { throw "No GGUF model found in models\gguf\1.7B" }
+          $binCandidates = @(
+            "bin\cpu\llama-cli.exe",
+            "bin\cuda\llama-cli.exe",
+            "bin\hip\llama-cli.exe",
+            "bin\vulkan\llama-cli.exe"
+          )
+          $bin = $binCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $bin) { throw "llama-cli.exe not found under bin/" }
+          & $bin -m $model.FullName -ngl 0 -c 256 --log-disable -st -n 10 -p "The meaning of life is"
+          if ($LASTEXITCODE -ne 0) { throw "llama-cli smoke test failed" }
+
+  # ──────────────────────────────────────────
+  # Optional: Self-hosted runners
+  # ──────────────────────────────────────────
 
   linux-cuda:
     name: Linux CUDA (self-hosted, optional)
-    if: ${{ inputs.enable_linux_cuda }}
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.enable_linux_cuda
+    needs: [download-model]
     runs-on: [self-hosted, Linux, X64, cuda]
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
+      - name: Download models
+        if: ${{ !inputs.force_fresh_download }}
+        uses: actions/download-artifact@v4
+        with:
+          name: bonsai-models
+          path: models
       - name: Log runner hardware
         run: |
           echo "Runner: $RUNNER_OS/$RUNNER_ARCH"
@@ -158,27 +336,33 @@ jobs:
           nvidia-smi || true
           rocminfo || true
           vulkaninfo --summary || true
-      - name: Cache models and binaries
+      - name: Cache binaries
         uses: actions/cache@v4
         with:
-          path: |
-            models
-            bin
-          key: ${{ runner.os }}-${{ runner.arch }}-cuda-bonsai-${{ env.BONSAI_MODEL }}-${{ hashFiles('scripts/download_models.sh', 'scripts/download_binaries.sh', 'setup.sh', 'setup.ps1') }}
+          path: bin
+          key: ${{ runner.os }}-${{ runner.arch }}-cuda-bonsai-bin-${{ hashFiles('scripts/download_binaries.sh', 'setup.sh') }}
           restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-cuda-bonsai-${{ env.BONSAI_MODEL }}-
+            ${{ runner.os }}-${{ runner.arch }}-cuda-bonsai-bin-
       - name: Setup
         run: ./setup.sh
       - name: llama-cli smoke test
-        run: './scripts/run_llama.sh -c 256 -st -n 1 -p "ok"'
+        run: './scripts/run_llama.sh -c 256 -st -n 10 -p "The meaning of life is"'
 
   windows-cuda:
     name: Windows CUDA (self-hosted, optional)
-    if: ${{ inputs.enable_windows_cuda }}
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.enable_windows_cuda
+    needs: [download-model]
     runs-on: [self-hosted, Windows, X64, cuda]
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
+      - name: Download models
+        if: ${{ !inputs.force_fresh_download }}
+        uses: actions/download-artifact@v4
+        with:
+          name: bonsai-models
+          path: models
       - name: Log runner hardware
         shell: pwsh
         run: |
@@ -186,15 +370,13 @@ jobs:
           Get-CimInstance Win32_Processor | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors | Format-Table -AutoSize
           Get-CimInstance Win32_VideoController | Select-Object Name, AdapterRAM, DriverVersion | Format-Table -AutoSize
           if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) { nvidia-smi }
-      - name: Cache models and binaries
+      - name: Cache binaries
         uses: actions/cache@v4
         with:
-          path: |
-            models
-            bin
-          key: ${{ runner.os }}-${{ runner.arch }}-cuda-bonsai-${{ env.BONSAI_MODEL }}-${{ hashFiles('scripts/download_models.sh', 'scripts/download_binaries.sh', 'setup.sh', 'setup.ps1') }}
+          path: bin
+          key: ${{ runner.os }}-${{ runner.arch }}-cuda-bonsai-bin-${{ hashFiles('scripts/download_binaries.sh', 'setup.sh', 'setup.ps1') }}
           restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-cuda-bonsai-${{ env.BONSAI_MODEL }}-
+            ${{ runner.os }}-${{ runner.arch }}-cuda-bonsai-bin-
       - name: Setup
         shell: pwsh
         run: |
@@ -213,16 +395,24 @@ jobs:
           )
           $bin = $binCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
           if (-not $bin) { throw "llama-cli.exe not found under bin/" }
-          & $bin -m $model.FullName -ngl 99 -c 256 --log-disable -st -n 1 -p "ok"
+          & $bin -m $model.FullName -ngl 99 -c 256 --log-disable -st -n 10 -p "The meaning of life is"
           if ($LASTEXITCODE -ne 0) { throw "llama-cli smoke test failed" }
 
   linux-amd:
     name: Linux AMD ROCm (self-hosted, optional)
-    if: ${{ inputs.enable_linux_amd }}
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.enable_linux_amd
+    needs: [download-model]
     runs-on: [self-hosted, Linux, X64, amd]
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
+      - name: Download models
+        if: ${{ !inputs.force_fresh_download }}
+        uses: actions/download-artifact@v4
+        with:
+          name: bonsai-models
+          path: models
       - name: Log runner hardware
         run: |
           echo "Runner: $RUNNER_OS/$RUNNER_ARCH"
@@ -231,27 +421,33 @@ jobs:
           nvidia-smi || true
           rocminfo || true
           vulkaninfo --summary || true
-      - name: Cache models and binaries
+      - name: Cache binaries
         uses: actions/cache@v4
         with:
-          path: |
-            models
-            bin
-          key: ${{ runner.os }}-${{ runner.arch }}-amd-bonsai-${{ env.BONSAI_MODEL }}-${{ hashFiles('scripts/download_models.sh', 'scripts/download_binaries.sh', 'setup.sh', 'setup.ps1') }}
+          path: bin
+          key: ${{ runner.os }}-${{ runner.arch }}-amd-bonsai-bin-${{ hashFiles('scripts/download_binaries.sh', 'setup.sh') }}
           restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-amd-bonsai-${{ env.BONSAI_MODEL }}-
+            ${{ runner.os }}-${{ runner.arch }}-amd-bonsai-bin-
       - name: Setup
         run: ./setup.sh
       - name: llama-cli smoke test
-        run: './scripts/run_llama.sh -c 256 -st -n 1 -p "ok"'
+        run: './scripts/run_llama.sh -c 256 -st -n 10 -p "The meaning of life is"'
 
   windows-amd:
     name: Windows AMD HIP (self-hosted, optional)
-    if: ${{ inputs.enable_windows_amd }}
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.enable_windows_amd
+    needs: [download-model]
     runs-on: [self-hosted, Windows, X64, amd]
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
+      - name: Download models
+        if: ${{ !inputs.force_fresh_download }}
+        uses: actions/download-artifact@v4
+        with:
+          name: bonsai-models
+          path: models
       - name: Log runner hardware
         shell: pwsh
         run: |
@@ -259,15 +455,13 @@ jobs:
           Get-CimInstance Win32_Processor | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors | Format-Table -AutoSize
           Get-CimInstance Win32_VideoController | Select-Object Name, AdapterRAM, DriverVersion | Format-Table -AutoSize
           if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) { nvidia-smi }
-      - name: Cache models and binaries
+      - name: Cache binaries
         uses: actions/cache@v4
         with:
-          path: |
-            models
-            bin
-          key: ${{ runner.os }}-${{ runner.arch }}-amd-bonsai-${{ env.BONSAI_MODEL }}-${{ hashFiles('scripts/download_models.sh', 'scripts/download_binaries.sh', 'setup.sh', 'setup.ps1') }}
+          path: bin
+          key: ${{ runner.os }}-${{ runner.arch }}-amd-bonsai-bin-${{ hashFiles('scripts/download_binaries.sh', 'setup.sh', 'setup.ps1') }}
           restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-amd-bonsai-${{ env.BONSAI_MODEL }}-
+            ${{ runner.os }}-${{ runner.arch }}-amd-bonsai-bin-
       - name: Setup
         shell: pwsh
         run: |
@@ -285,16 +479,24 @@ jobs:
           )
           $bin = $binCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
           if (-not $bin) { throw "llama-cli.exe not found under bin/" }
-          & $bin -m $model.FullName -ngl 99 -c 256 --log-disable -st -n 1 -p "ok"
+          & $bin -m $model.FullName -ngl 99 -c 256 --log-disable -st -n 10 -p "The meaning of life is"
           if ($LASTEXITCODE -ne 0) { throw "llama-cli smoke test failed" }
 
   linux-vulkan:
     name: Linux Vulkan (self-hosted, optional)
-    if: ${{ inputs.enable_linux_vulkan }}
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.enable_linux_vulkan
+    needs: [download-model]
     runs-on: [self-hosted, Linux, X64, vulkan]
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
+      - name: Download models
+        if: ${{ !inputs.force_fresh_download }}
+        uses: actions/download-artifact@v4
+        with:
+          name: bonsai-models
+          path: models
       - name: Log runner hardware
         run: |
           echo "Runner: $RUNNER_OS/$RUNNER_ARCH"
@@ -303,27 +505,33 @@ jobs:
           nvidia-smi || true
           rocminfo || true
           vulkaninfo --summary || true
-      - name: Cache models and binaries
+      - name: Cache binaries
         uses: actions/cache@v4
         with:
-          path: |
-            models
-            bin
-          key: ${{ runner.os }}-${{ runner.arch }}-vulkan-bonsai-${{ env.BONSAI_MODEL }}-${{ hashFiles('scripts/download_models.sh', 'scripts/download_binaries.sh', 'setup.sh', 'setup.ps1') }}
+          path: bin
+          key: ${{ runner.os }}-${{ runner.arch }}-vulkan-bonsai-bin-${{ hashFiles('scripts/download_binaries.sh', 'setup.sh') }}
           restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-vulkan-bonsai-${{ env.BONSAI_MODEL }}-
+            ${{ runner.os }}-${{ runner.arch }}-vulkan-bonsai-bin-
       - name: Setup
         run: ./setup.sh
       - name: llama-cli smoke test
-        run: './scripts/run_llama.sh -c 256 -st -n 1 -p "ok"'
+        run: './scripts/run_llama.sh -c 256 -st -n 10 -p "The meaning of life is"'
 
   windows-vulkan:
     name: Windows Vulkan (self-hosted, optional)
-    if: ${{ inputs.enable_windows_vulkan }}
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.enable_windows_vulkan
+    needs: [download-model]
     runs-on: [self-hosted, Windows, X64, vulkan]
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
+      - name: Download models
+        if: ${{ !inputs.force_fresh_download }}
+        uses: actions/download-artifact@v4
+        with:
+          name: bonsai-models
+          path: models
       - name: Log runner hardware
         shell: pwsh
         run: |
@@ -331,15 +539,13 @@ jobs:
           Get-CimInstance Win32_Processor | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors | Format-Table -AutoSize
           Get-CimInstance Win32_VideoController | Select-Object Name, AdapterRAM, DriverVersion | Format-Table -AutoSize
           if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) { nvidia-smi }
-      - name: Cache models and binaries
+      - name: Cache binaries
         uses: actions/cache@v4
         with:
-          path: |
-            models
-            bin
-          key: ${{ runner.os }}-${{ runner.arch }}-vulkan-bonsai-${{ env.BONSAI_MODEL }}-${{ hashFiles('scripts/download_models.sh', 'scripts/download_binaries.sh', 'setup.sh', 'setup.ps1') }}
+          path: bin
+          key: ${{ runner.os }}-${{ runner.arch }}-vulkan-bonsai-bin-${{ hashFiles('scripts/download_binaries.sh', 'setup.sh', 'setup.ps1') }}
           restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-vulkan-bonsai-${{ env.BONSAI_MODEL }}-
+            ${{ runner.os }}-${{ runner.arch }}-vulkan-bonsai-bin-
       - name: Setup
         shell: pwsh
         run: |
@@ -356,5 +562,5 @@ jobs:
           )
           $bin = $binCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
           if (-not $bin) { throw "llama-cli.exe not found under bin/" }
-          & $bin -m $model.FullName -ngl 99 -c 256 --log-disable -st -n 1 -p "ok"
+          & $bin -m $model.FullName -ngl 99 -c 256 --log-disable -st -n 10 -p "The meaning of life is"
           if ($LASTEXITCODE -ne 0) { throw "llama-cli smoke test failed" }
