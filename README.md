@@ -12,16 +12,30 @@
   <a href="https://discord.gg/prismml"><b>Discord</b></a>
 </p>
 
-Using this demo you can run Bonsai language models locally on Mac (Metal), Linux/Windows (CUDA, Vulkan, ROCm), or CPU.
+
+Using this demo you can run 1-bit Bonsai language models locally on Mac (Metal), Linux/Windows (CUDA, Vulkan, ROCm), or CPU.
+
+## Other Bonsai Demos
+
+Below are featured community demos and additional Bonsai demos hosted outside this repository.
+
+| Demo | Description |
+|------|-------------|
+| [Bonsai WebGPU](https://huggingface.co/spaces/webml-community/bonsai-webgpu) | Community / HuggingFace — runs directly in your browser, no setup required |
+| [Bonsai GPU Demo](https://huggingface.co/spaces/prism-ml/Bonsai-demo) | Our hosted demo on GPUs on HuggingFace Spaces|
+| [Google Colab Notebook](https://colab.research.google.com/drive/1EzyAaQ2nwDv_1X0jaC5XiVC3ZREg9bdG?usp=sharing) | Run Bonsai in a Google Colab notebook |
+
+---
+
+## Upstream Status for 1-bit
 
 - **[llama.cpp](https://github.com/ggml-org/llama.cpp)** (GGUF) — C/C++, runs on Mac (Metal), Linux/Windows (CUDA, Vulkan, ROCm/HIP), and CPU.
 - **[MLX](https://github.com/ml-explore/mlx)** (MLX format) — Python, optimized for Apple Silicon.
 
-Q1_0 support for CPU, Metal, and Vulkan backends is already merged into upstream llama.cpp. Additional backends (optimized x86 CPU, CUDA, AMD) are pending. In the meantime, our fork provides a more complete set of backends in one place:
+Q1_0 support for CPU, Metal, CUDA, and Vulkan backends is already merged into upstream llama.cpp. Additional backends (optimized x86 CPU, AMD) are pending. In the meantime, our fork provides a more complete set of backends in one place:
 - **llama.cpp:** [PrismML-Eng/llama.cpp](https://github.com/PrismML-Eng/llama.cpp) — [pre-built binaries](https://github.com/PrismML-Eng/llama.cpp/releases/tag/prism-b8796-e2d6742)
 - **MLX:** [PrismML-Eng/mlx](https://github.com/PrismML-Eng/mlx) (branch `prism`)
 
-## Upstream Status
 | Backend | Status | PR |
 |---------|--------|----|
 | CPU (generic) | ✅ Merged | [#21273](https://github.com/ggml-org/llama.cpp/pull/21273) |
